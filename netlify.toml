@@ -1,0 +1,12 @@
+[build]
+  base = "web"
+  command = "npm run build"
+  publish = "web/dist"
+
+# The WebSocket relay (relay-server) runs on your own box — e.g. the teacher
+# PC or a LAN server. Point the web UI at it by setting the WS URL in the
+# UI's 服务器 settings, or pre-seed it via a redirect rule below.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

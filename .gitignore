@@ -1,0 +1,9 @@
+# binaries, build output
+bin/
+web/dist/
+web/node_modules/
+
+# misc
+*.exe
+*.test
+.DS_Store

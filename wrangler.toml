@@ -1,0 +1,6 @@
+name = "classroom-messagesender"
+compatibility_date = "2026-10-01"
+pages_build_output_dir = "web/dist"
+
+# Static frontend only. The WebSocket relay must run on a machine you control
+# (teacher PC / LAN server). Classroom PCs connect to THAT address.
