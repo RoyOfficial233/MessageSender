@@ -158,3 +158,28 @@ go run ./cmd/smoke-teacher    # 冒烟：需服务器+客户端在线（MS_URL/M
 ```
 
 或用任务计划程序设置登录时启动、断电重启后自动恢复。
+
+## 教室电脑无法直连 workers.dev（走代理）
+
+国内网络下 `*.workers.dev` 常被阻断，relay-client 内置代理支持：
+
+```
+-proxy none                      直连（默认行为同旧版）
+-proxy auto                      自动读 ALL_PROXY / HTTPS_PROXY / HTTP_PROXY 环境变量（默认）
+-proxy http://127.0.0.1:7890     指定 HTTP 代理（Clash/v2ray 的混合端口）
+-proxy socks5://127.0.0.1:7891   指定 SOCKS5 代理
+-proxy socks5h://user:pass@…:1080  SOCKS5 + 代理解析 DNS（域名也走代理）
+```
+
+要点：
+
+- **默认就是 `auto`**：只要系统/用户环境变量里有 `HTTPS_PROXY` 或 `ALL_PROXY`，客户端自动走代理，无需加参数
+- 推荐在教室电脑上用 `-proxy http://<代理机>:7890` 显式指定局域网代理（如教师机跑 Clash 局域网共享）
+- `socks5h://` 会把 DNS 解析也交给代理，阻断最彻底时用它
+- 已实测：HTTP CONNECT 与 SOCKS5 隧道内 WebSocket/wss 握手均通过（本地 Go 中继 + 远程 wss://echo.websocket.org）
+
+快捷方式示例（教室电脑，教师机 192.168.1.10 上跑代理）：
+
+```
+C:\path\relay-client.exe -url wss://classroom-relay.xxx.workers.dev/ws -id pc-01 -name 一号机房 -token mysecret -proxy http://192.168.1.10:7890
+```

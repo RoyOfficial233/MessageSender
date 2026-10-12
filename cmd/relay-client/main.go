@@ -47,6 +47,8 @@ var (
 	client = flag.String("id", "", "client id (default: hostname)")
 	name   = flag.String("name", "", "human-readable name shown to teacher")
 	token  = flag.String("token", "", "shared auth token")
+	proxy  = flag.String("proxy", "auto",
+		`proxy for reaching the relay: "none" = direct; "auto"/"env" = read ALL_PROXY/HTTPS_PROXY/HTTP_PROXY; or an explicit url like http://127.0.0.1:7890, socks5://127.0.0.1:7891, socks5h://…`)
 	quiet  = flag.Bool("quiet", false, "log to a file instead of console")
 )
 
@@ -71,13 +73,22 @@ func main() {
 		log.Printf("no TTS voices detected (System.Speech unavailable?)")
 	}
 
-	c := &app{id: id, name: *name, token: *token, voices: voices}
+	dialer, err := buildDialer(*proxy, 10*time.Second, os.Getenv)
+	if err != nil {
+		log.Fatalf("-proxy: %v", err)
+	}
+	if resolved, _ := resolveProxySpec(*proxy, os.Getenv); resolved != "" {
+		log.Printf("using proxy %s", resolved)
+	}
+
+	c := &app{id: id, name: *name, token: *token, voices: voices, dialer: dialer}
 	c.run(ctx)
 }
 
 type app struct {
 	id, name, token string
 	voices          []string
+	dialer          *websocket.Dialer
 }
 
 func (a *app) run(ctx context.Context) {
@@ -102,8 +113,7 @@ func (a *app) session(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	d := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
-	conn, _, err := d.DialContext(ctx, u.String(), nil)
+	conn, _, err := a.dialer.DialContext(ctx, u.String(), nil)
 	if err != nil {
 		return err
 	}
