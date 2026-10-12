@@ -6,12 +6,25 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 	xproxy "golang.org/x/net/proxy"
 )
+
+// proxyMode renders the -proxy flag value (or resolved proxy url) for logs.
+func proxyMode(spec string) string {
+	resolved, err := resolveProxySpec(spec, os.Getenv)
+	if err != nil {
+		return "invalid:" + spec
+	}
+	if resolved == "" {
+		return "direct"
+	}
+	return resolved
+}
 
 // resolveProxySpec interprets the -proxy flag:
 //

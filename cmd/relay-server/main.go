@@ -15,6 +15,10 @@ import (
 	"github.com/RoyOfficial233/messagesender/relay"
 )
 
+// version is set at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
+
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	token := flag.String("token", "", "shared auth token (empty disables auth)")
@@ -42,7 +46,7 @@ func main() {
 	mux.Handle("/healthz", api)
 	mux.Handle("/", root)
 
-	log.Printf("relay-server listening on %s (token=%s, dist=%q)", *addr, mask(*token), *dist)
+	log.Printf("relay-server %s listening on %s (token=%s, dist=%q)", version, *addr, mask(*token), *dist)
 	if err := http.ListenAndServe(*addr, mux); err != nil {
 		log.Fatal(err)
 	}

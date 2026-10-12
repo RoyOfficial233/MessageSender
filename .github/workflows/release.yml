@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag format
+        run: |
+          tag="${{ inputs.tag }}"
+          if ! echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag must look like v0.1.0 or v0.1.0-rc.1, got '$tag'"
+            exit 1
+          fi
+
+      - name: Prevent duplicate releases
+        run: |
+          if git rev-parse -q --verify "refs/tags/${{ inputs.tag }}" >/dev/null; then
+            echo "::error::tag ${{ inputs.tag }} already exists — pick a new one"
+            exit 1
+          fi
+          existing=$(gh release view "${{ inputs.tag }}" --json tagName -q .tagName 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            echo "::error::release ${{ inputs.tag }} already exists"
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Generate release notes (conventional-commit categorized)
+        run: |
+          mkdir -p out
+          bash scripts/release-notes.sh "${{ inputs.tag }}" > out/notes.md
+          cat out/notes.md
+
+      - name: Build binaries
+        run: |
+          version="${{ inputs.tag }}"
+          mkdir -p out
+          targets="windows/amd64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"
+          for target in $targets; do
+            os="${target%/*}"; arch="${target#*/}"
+            name="relay-client-${version}-${os}-${arch}"
+            [ "$os" = "windows" ] && ext=".exe" || ext=""
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch \
+              go build -trimpath -ldflags "-s -w -X main.version=${version}" \
+              -o "out/${name}${ext}" ./cmd/relay-client
+            echo "built out/${name}${ext}"
+          done
+          # relay-server: the platforms that actually run it (LAN deploys)
+          for target in windows/amd64 linux/amd64 linux/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            name="relay-server-${version}-${os}-${arch}"
+            [ "$os" = "windows" ] && ext=".exe" || ext=""
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch \
+              go build -trimpath -ldflags "-s -w -X main.version=${version}" \
+              -o "out/${name}${ext}" ./cmd/relay-server
+            echo "built out/${name}${ext}"
+          done
+          ls -la out/
+
+      - name: Create tag
+        run: |
+          git config user.name "release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+          git tag -a "${{ inputs.tag }}" -m "Release ${{ inputs.tag }}"
+          git push origin "${{ inputs.tag }}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.tag }}" out/relay-* \
+            --title "教室传话系统 ${{ inputs.tag }}" \
+            --notes-file out/notes.md \
+            ${{ inputs.prerelease && '--prerelease' || '' }} \
+            --target "$(git rev-parse HEAD)"
+
+      - name: Summary
+        run: |
+          cat out/notes.md >> "$GITHUB_STEP_SUMMARY"
+          echo "Release URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ inputs.tag }}" >> "$GITHUB_STEP_SUMMARY"

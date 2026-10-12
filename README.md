@@ -149,6 +149,28 @@ cd worker && npx tsc --noEmit  # Worker 类型检查
 go run ./cmd/smoke-teacher    # 冒烟：需服务器+客户端在线（MS_URL/MS_TOKEN 可覆盖）
 ```
 
+## 发布 Release（GitHub Actions）
+
+到 **Actions → Release → Run workflow**，输入两个参数即可：
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `tag` | 版本号（必须 `v` 开头，semver） | `v0.1.0` / `v0.2.0-rc.1` |
+| `prerelease` | 是否标记为预发布 | 勾选 = Pre-release |
+
+流程自动完成：跑测试 → 按上一个 tag 以来的 **commit 类型归类**生成更新说明
+（feat→✨新功能、fix→🐛修复、refactor→♻️重构、docs→📝文档、test→✅测试 …）→
+交叉编译二进制（relay-client: Windows/Linux/macOS × amd64/arm64；relay-server: Windows/Linux）→
+打 tag → 创建 Release 并上传产物。
+
+本地预览生成同一份说明：
+
+```bash
+bash scripts/release-notes.sh v0.1.0
+```
+
+二进制文件名形如 `relay-client-v0.1.0-windows-amd64.exe`，版本号会打进 `main.version`（启动日志可见）。
+
 ## 教室电脑开机自启（Windows）
 
 把客户端快捷方式放入启动文件夹 (Win+R → `shell:startup`)：

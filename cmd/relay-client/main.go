@@ -32,6 +32,10 @@ import (
 	"github.com/RoyOfficial233/messagesender/relay"
 )
 
+// version is set at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
+
 type msgPayload struct {
 	Kind   string `json:"kind"` // tts | audio | text
 	Text   string `json:"text,omitempty"`
@@ -118,7 +122,7 @@ func (a *app) session(ctx context.Context) error {
 		return err
 	}
 	defer conn.Close()
-	log.Printf("connected to %s as %q", u.String(), a.id)
+	log.Printf("relay-client %s connecting to %s as %q (proxy=%s)", version, u.String(), a.id, proxyMode(*proxy))
 
 	reg := relay.Envelope{Type: "register", Role: "client", ClientID: a.id, Name: a.name, Token: a.token, Voices: a.voices}
 	if reg.Name == "" {
