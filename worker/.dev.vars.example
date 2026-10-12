@@ -1,0 +1,4 @@
+# Copy to .dev.vars (git-ignored) for local dev; use
+#   npx wrangler secret put TOKEN
+# to set it in production. Empty/omitted disables auth.
+TOKEN=test123

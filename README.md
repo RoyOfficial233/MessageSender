@@ -2,33 +2,45 @@
 
 老师向多台教室电脑实时传话：**TTS 语音播报**、**录音直发**、**文字弹窗通知**。
 
-- 后端：Go（WebSocket 中继 + 教室电脑原生客户端）
-- 前端：Vue 3 + Ant Design Vue 4（纯静态，可部署到 Netlify / Vercel / Cloudflare Pages）
+- 后端（两种可选）：Go 自建 WebSocket 中继 **或** Cloudflare Worker (Durable Objects)
+- 教室电脑客户端：Go（SAPI TTS / WAV 播放 / 弹窗）
+- 前端：Vue 3 + Ant Design Vue 4（纯静态）
 
 ```
 ┌──────────────┐        WSS        ┌───────────────┐        WS         ┌──────────────┐
-│  老师浏览器    │ ───────────────▶ │  relay-server  │ ───────────────▶ │ 教室电脑 ×N   │
-│  (教师控制台)  │                   │  (Go, 自建)    │                   │ relay-client │
+│  老师浏览器    │ ───────────────▶ │    中继服务     │ ───────────────▶ │ 教室电脑 ×N   │
+│  (教师控制台)  │                   │  Go 或 CF DO   │                   │ relay-client │
 └──────────────┘ ◀─── ack/report ──└───────────────┘◀── ack/reconnect ─└──────────────┘
 ```
 
-## 为什么中继要自建
+## 两种服务端，一个协议
 
-Netlify/Vercel/CF Pages 只能托管静态前端，**不能跑长连 WebSocket 服务**。
-本方案：前端部署到任一静态平台，WebSocket 中继 `relay-server` 跑在你控制的机器上
-（教师机、机房服务器、或任意 VPS / 内网电脑）。教室电脑与教师浏览器都连它。
+中继协议是同一套 JSON envelope，三种角色**互接互换，零改动**：
+
+| 服务端 | 目录 | 适用 |
+|--------|------|------|
+| Go relay-server | `cmd/relay-server` | 教师机/内网服务器直接跑，单二进制，也可托管前端 |
+| Cloudflare Worker | `worker/` | **无服务器部署**：`npx wrangler deploy` 一条命令上线，免费额度内可跑，前端+中继一体 |
+
+已实测：Go 客户端与 Vue 前端连接 CF Worker（本地 wrangler dev），
+presence/msg/report/ack 全链路与 Go 服务端行为一致（SMOKE-PASS）。
+
+> 为什么 Worker 必须用 Durable Objects：普通 Worker 请求间不共享状态、
+> 无法持有 WebSocket 集线器；DO + WebSocket Hibernation API 才能做广播。
+> 空闲 socket 几乎零成本，SQLite-backed DO 类可在免费计划使用。
 
 ## 目录
 
 ```
 relay/            Go 中继核心（Hub + WebSocket，含单元/集成测试）
-cmd/relay-server  服务器：WS 中继 + 可选静态托管 (-dist web/dist)
+worker/           CF Worker 中继（Durable Objects，协议与 Go 版一致）
+cmd/relay-server  Go 服务器：WS 中继 + 可选静态托管 (-dist web/dist)
 cmd/relay-client  教室电脑客户端：SAPI TTS 播报、WAV 播放、弹窗、断线重连
 cmd/smoke-teacher 端到端冒烟测试（模拟教师发 TTS，验证 ack 回流）
 web/              Vue 3 + Ant Design Vue 前端
 ```
 
-## 快速开始（本机演示）
+## 快速开始（本机演示，Go 服务端）
 
 ```bash
 # 1. 构建全部
@@ -46,15 +58,32 @@ cd web && npm install && npm run build && cd ..
 http://教师机IP:8080/#/teacher
 ```
 
-## 前端部署
+## 部署到 Cloudflare（Worker 当服务端，推荐免运维方案）
+
+```bash
+cd web && npm install && npm run build && cd ..
+cd worker && npm install
+cp .dev.vars.example .dev.vars        # 本地开发 token；生产用 wrangler secret
+npx wrangler dev                      # 本地试跑: http://127.0.0.1:8787
+npx wrangler secret put TOKEN         # 生产鉴权（可跳过=无鉴权）
+npx wrangler deploy                   # 上线，得到 https://classroom-relay.<账号>.workers.dev
+```
+
+部署后：
+- 老师：`https://classroom-relay.xxx.workers.dev/#/teacher`
+- 教室电脑：`relay-client.exe -url wss://classroom-relay.xxx.workers.dev/ws -token <token>`
+
+注意：Worker 单条 WS 消息上限 1MiB，语音直发请控制在 ~20 秒内（超限会被拒绝并提示）。
+
+## 前端单独部署（静态托管）
 
 | 平台 | 配置 | 命令 |
 |------|------|------|
-| Netlify | `netlify.toml` 已就绪 | `netlify deploy --prod` |
-| Vercel | `vercel.json` 已就绪 | `vercel --prod` |
-| CF Pages | `wrangler.toml` 已就绪 | `npx wrangler pages deploy web/dist` |
+| Netlify | `netlify.toml` | `netlify deploy --prod` |
+| Vercel | `vercel.json` | `vercel --prod` |
+| CF Pages | `wrangler.toml` | `npx wrangler pages deploy web/dist` |
 
-部署后在教师控制台「服务器」设置里填中继地址，如 `ws://192.168.1.10:8080/ws`。
+部署后在教师控制台「服务器」设置里填中继地址，如 `wss://classroom-relay.xxx.workers.dev/ws`。
 
 ## 消息协议（JSON envelope）
 
@@ -76,15 +105,16 @@ http://教师机IP:8080/#/teacher
 
 ## 安全
 
-- `-token` 共享令牌：register 时校验，防止陌生连接
-- 生产建议置于反向代理（nginx/caddy）之后启用 TLS（wss://）
+- `token`/`TOKEN` 共享令牌：register 时校验，防止陌生连接
+- Go 服务端置于反代后可启用 TLS（wss://）；Worker 天然 https/wss
 - 教室电脑以当前用户运行即可；弹窗与 TTS 无需管理员权限
 
 ## 测试
 
 ```bash
-go test ./relay/          # 11 单元 + 3 集成（真实 WS 端到端）
-go run ./cmd/smoke-teacher  # 冒烟：需服务器+客户端在线
+go test ./relay/            # 11 单元 + 3 集成（真实 WS 端到端）
+cd worker && npx tsc --noEmit  # Worker 类型检查
+go run ./cmd/smoke-teacher    # 冒烟：需服务器+客户端在线（MS_URL/MS_TOKEN 可覆盖）
 ```
 
 ## 教室电脑开机自启（Windows）
@@ -92,7 +122,7 @@ go run ./cmd/smoke-teacher  # 冒烟：需服务器+客户端在线
 把客户端快捷方式放入启动文件夹 (Win+R → `shell:startup`)：
 
 ```
-目标: C:\path\relay-client.exe -url ws://教师机:8080/ws -id pc-01 -name 一号机房 -token mysecret
+目标: C:\path\relay-client.exe -url wss://中继地址/ws -id pc-01 -name 一号机房 -token mysecret
 ```
 
 或用任务计划程序设置登录时启动、断电重启后自动恢复。
