@@ -60,14 +60,33 @@ http://教师机IP:8080/#/teacher
 
 ## 部署到 Cloudflare（Worker 当服务端，推荐免运维方案）
 
+> ⚠️ 注意：中继用的是 **Durable Objects**，必须部署为 **Workers** 项目。
+> **不要建 Pages 项目** —— Pages 只能跑静态页/函数，跑不了 DO，
+> 且在 Pages 里执行 `wrangler deploy` 会报 `Missing entry-point`（根目录已无 wrangler.toml）。
+
+**方式一：本地/命令行部署（最简单）**
+
 ```bash
 cd web && npm install && npm run build && cd ..
 cd worker && npm install
 cp .dev.vars.example .dev.vars        # 本地开发 token；生产用 wrangler secret
 npx wrangler dev                      # 本地试跑: http://127.0.0.1:8787
+npx wrangler login                    # 首次登录（浏览器授权）
 npx wrangler secret put TOKEN         # 生产鉴权（可跳过=无鉴权）
 npx wrangler deploy                   # 上线，得到 https://classroom-relay.<账号>.workers.dev
 ```
+
+**方式二：Git 连接自动部署（Workers Builds）**
+
+在 Cloudflare 控制台创建 **Workers & Pages → Create → Workers → Connect to Git**，选本仓库后设置：
+
+| 设置项 | 值 |
+|--------|-----|
+| Root directory | `/`（仓库根） |
+| Build command | `cd web && npm ci && npm run build` |
+| Deploy command | `cd worker && npm ci && npx wrangler deploy` |
+
+（若面板要求填写 wrangler 配置路径，填 `worker/wrangler.toml`。）
 
 部署后：
 - 老师：`https://classroom-relay.xxx.workers.dev/#/teacher`
@@ -75,13 +94,26 @@ npx wrangler deploy                   # 上线，得到 https://classroom-relay.
 
 注意：Worker 单条 WS 消息上限 1MiB，语音直发请控制在 ~20 秒内（超限会被拒绝并提示）。
 
-## 前端单独部署（静态托管）
+### 费用：免费计划够用
+
+Durable Objects 在 **Workers Free 计划内免费**（本项目的 `new_sqlite_classes` 配置正是免费计划要求的 SQLite 后端）。按官方计费规则估算本项目的用量：
+
+| 计费项 | 免费额度 | 本项目用量 |
+|--------|----------|-----------|
+| DO 请求 | 10 万/天 | 建 WS 连接时每台 1 次；**收到的**消息按 20:1 折算（客户端 20s 心跳 ×50 台 ×24h ≈ 1.1 万/天）；**发出的**消息（presence/消息广播）完全免费 |
+| DO 时长 | 13,000 GB-s/天 | 用了 Hibernation API：空闲即休眠不计费，只在处理消息的毫秒级时间计费 |
+| DO 存储 | 5 GB | **0** —— 本中继不使用 DO 存储，连接状态在内存+附件 |
+| 静态资源请求 | 免费无限 | 前端页面的加载 |
+
+教室场景（每天 8–10 节课、几十台电脑）远达不到上限。超出免费额度时 Free 计划的行为是**直接报错停止服务**（不会悄悄扣费）；需要更大余量再升 Workers Paid（$5/月起，含 100 万请求/月）。
+
+## 前端单独部署（静态托管，需另行运行中继）
 
 | 平台 | 配置 | 命令 |
 |------|------|------|
 | Netlify | `netlify.toml` | `netlify deploy --prod` |
 | Vercel | `vercel.json` | `vercel --prod` |
-| CF Pages | `wrangler.toml` | `npx wrangler pages deploy web/dist` |
+| CF Pages | 无需配置文件 | `npx wrangler pages deploy web/dist` |
 
 部署后在教师控制台「服务器」设置里填中继地址，如 `wss://classroom-relay.xxx.workers.dev/ws`。
 

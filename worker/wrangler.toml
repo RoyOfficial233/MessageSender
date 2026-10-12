@@ -1,6 +1,7 @@
 name = "classroom-relay"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
+send_metrics = false
 
 # All-in-one deployment: this Worker serves the built frontend (../web/dist)
 # AND the WebSocket relay. `npx wrangler deploy` ships both in one step.
